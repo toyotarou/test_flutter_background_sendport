@@ -5,6 +5,7 @@ import 'dart:isolate';
 
 import 'package:background_task/background_task.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:isar/isar.dart';
 import 'package:path_provider/path_provider.dart';
@@ -12,7 +13,6 @@ import 'package:path_provider/path_provider.dart';
 part 'main.g.dart';
 
 final ReceivePort _backgroundReceivePort = ReceivePort();
-
 late Isar isar;
 
 @collection
@@ -25,8 +25,6 @@ class WifiCoordinate {
   late String longitude;
   late String ssid;
 }
-
-//--------------------------------------------------------------------------
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -50,8 +48,6 @@ void main() async {
   runApp(const MyApp());
 }
 
-//--------------------------------------------------------------------------
-
 Future<void> _saveToIsar(Map<String, String> data) async {
   final DateTime now = DateTime.now();
 
@@ -71,8 +67,6 @@ Future<void> _saveToIsar(Map<String, String> data) async {
   debugPrint('💾 保存完了: ${wifi.ssid} ${wifi.latitude}, ${wifi.longitude}');
 }
 
-//--------------------------------------------------------------------------
-
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
@@ -82,8 +76,45 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   List<WifiCoordinate> _records = <WifiCoordinate>[];
+  Timer? _timer;
+  late Ticker _ticker;
+  late DateTime _lastSentTime;
+  double _elapsedSeconds = 0.0;
 
-  ///
+  @override
+  void initState() {
+    super.initState();
+
+    _loadRecords();
+
+    (() async {
+      await BackgroundTask.instance.setBackgroundHandler(backgroundHandler);
+      await BackgroundTask.instance.start();
+      debugPrint('✅ BackgroundTask started');
+    })();
+
+    _lastSentTime = DateTime.now();
+
+    _timer = Timer.periodic(const Duration(minutes: 1), (Timer t) async {
+      debugPrint('⏱️ タイマー発動');
+      await sendWifiLocationFromKotlin();
+    });
+
+    _ticker = Ticker((_) {
+      setState(() {
+        _elapsedSeconds = DateTime.now().difference(_lastSentTime).inMilliseconds / 1000.0;
+      });
+    });
+    _ticker.start();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _ticker.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadRecords() async {
     final List<WifiCoordinate> list = await isar.wifiCoordinates.where().sortByDate().thenByTime().findAll();
     setState(() {
@@ -91,24 +122,10 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
-  ///
-  @override
-  void initState() {
-    super.initState();
-
-    _loadRecords();
-
-    // ✅ ボタンAの処理をここに移動（初回自動実行）
-    (() async {
-      await BackgroundTask.instance.setBackgroundHandler(backgroundHandler);
-      await BackgroundTask.instance.start();
-      debugPrint('✅ BackgroundTask started');
-    })();
-  }
-
-  ///
   @override
   Widget build(BuildContext context) {
+    final double remaining = (60.0 - _elapsedSeconds).clamp(0, 60);
+
     return MaterialApp(
       home: Scaffold(
         appBar: AppBar(title: const Text('📡 Wi-Fi 情報記録一覧')),
@@ -117,13 +134,14 @@ class _MyAppState extends State<MyApp> {
             const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                ElevatedButton.icon(
-                  onPressed: sendWifiLocationFromKotlin,
-                  icon: const Icon(Icons.wifi),
-                  label: const Text('📡 現在の位置を取得'),
-                ),
-              ],
+              children: const <Widget>[Text('⏳ 起動中… Wi-Fi取得は1分毎に実行されます')],
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '⏱ 次回取得まで: ${remaining.toStringAsFixed(3)} 秒',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
             ),
             const Divider(),
             const Text('📋 保存済みWi-Fi情報一覧'),
@@ -145,7 +163,6 @@ class _MyAppState extends State<MyApp> {
     );
   }
 
-  ///
   Future<void> sendWifiLocationFromKotlin() async {
     const MethodChannel methodChannel = MethodChannel('com.example.flutter_background_sendport/bg');
 
@@ -160,15 +177,14 @@ class _MyAppState extends State<MyApp> {
         debugPrint('📦 Dartで解析済みデータ: $data');
 
         await _saveToIsar(data);
-        await _loadRecords(); // 追加後にリロード
+        await _loadRecords();
+        _lastSentTime = DateTime.now(); // ✅ 時刻更新
       }
     } on PlatformException catch (e) {
       debugPrint('⚠️ PlatformException: ${e.message}');
     }
   }
 }
-
-//--------------------------------------------------------------------------
 
 class BackgroundReceivePortSingleton {
   BackgroundReceivePortSingleton._();
@@ -183,8 +199,6 @@ class BackgroundReceivePortSingleton {
 
   SendPort? get port => _sendPort;
 }
-
-//--------------------------------------------------------------------------
 
 @pragma('vm:entry-point')
 Future<void> backgroundHandler(dynamic data) async {
@@ -202,8 +216,6 @@ Future<void> backgroundHandler(dynamic data) async {
     debugPrint('⚠️ SendPort not found');
   }
 }
-
-//--------------------------------------------------------------------------
 
 Map<String, String>? _extractData(String message) {
   final RegExp regex = RegExp(r'\{.*\}');

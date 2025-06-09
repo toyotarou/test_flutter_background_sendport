@@ -1,53 +1,29 @@
 package com.example.flutter_background_sendport
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
-import android.location.Location
-import android.location.LocationManager
-import android.net.wifi.WifiManager
-import android.util.Log
-import androidx.core.content.ContextCompat
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.MethodChannel.MethodCallHandler
+import io.flutter.plugin.common.MethodChannel.Result
+import org.json.JSONObject
 
-class WifiLocationApiImpl(private val context: Context) {
+class WifiLocationApiImpl(private val context: Context) : MethodCallHandler {
 
-    fun getCurrentWifiLocation(): Map<String, String> {
-        val wifiManager =
-            context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        val wifiInfo = wifiManager.connectionInfo
-        val ssid = wifiInfo.ssid?.replace("\"", "") ?: "Unknown SSID"
+    override fun onMethodCall(call: MethodCall, result: Result) {
+        if (call.method == "getCurrentWifiLocation") {
+            val ssid = "aterm-f1db10-a"
+            val lat = 35.718389016152436
+            val lng = 139.5869888374933
 
-        var lat = "0.0"
-        var lng = "0.0"
+            // JSON 形式で返す
+            val json = JSONObject()
+            json.put("ssid", ssid)
+            json.put("lat", lat)
+            json.put("lng", lng)
 
-        val hasPermission = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-
-        if (hasPermission) {
-            val locationManager =
-                context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            val location: Location? =
-                locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                    ?: locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-
-            if (location != null) {
-                lat = location.latitude.toString()
-                lng = location.longitude.toString()
-            }
+            result.success(json.toString()) // ← 文字列として返す
         } else {
-            Log.w("WifiLocationApi", "⚠️ ACCESS_FINE_LOCATION not granted")
+            result.notImplemented()
         }
-
-        val result = mapOf(
-            "ssid" to ssid,
-            "lat" to lat,
-            "lng" to lng
-        )
-
-        Log.d("WifiLocationApi", "📡 実測Wi-Fi位置情報: $result")
-
-        return result
     }
 }

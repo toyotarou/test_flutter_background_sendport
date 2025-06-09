@@ -29,12 +29,10 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final Directory dir = await getApplicationSupportDirectory();
-  // ignore: strict_raw_type, always_specify_types
   isar = await Isar.open(<CollectionSchema>[WifiCoordinateSchema], directory: dir.path);
 
   BackgroundReceivePortSingleton.instance.register(_backgroundReceivePort.sendPort);
 
-  // ignore: always_specify_types
   _backgroundReceivePort.listen((message) async {
     debugPrint('📥 Dart received: $message');
     if (message is String && message.contains('backgroundHandler')) {
@@ -88,7 +86,15 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
+
     _loadRecords();
+
+    // ✅ ボタンAの処理をここに移動（初回自動実行）
+    (() async {
+      await BackgroundTask.instance.setBackgroundHandler(backgroundHandler);
+      await BackgroundTask.instance.start();
+      debugPrint('✅ BackgroundTask started');
+    })();
   }
 
   @override
@@ -102,18 +108,11 @@ class _MyAppState extends State<MyApp> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                ElevatedButton(
-                  onPressed: () async {
-                    await BackgroundTask.instance.setBackgroundHandler(backgroundHandler);
-                    await BackgroundTask.instance.start();
-                    debugPrint('✅ BackgroundTask started');
-                  },
-                  child: const Text('a'),
+                ElevatedButton.icon(
+                  onPressed: sendWifiLocationFromKotlin,
+                  icon: const Icon(Icons.wifi),
+                  label: const Text('📡 現在の位置を取得'),
                 ),
-                const SizedBox(width: 12),
-                const ElevatedButton(onPressed: sendWifiLocationFromKotlin, child: Text('b')),
-                const SizedBox(width: 12),
-                ElevatedButton(onPressed: _loadRecords, child: const Text('c')),
               ],
             ),
             const Divider(),
@@ -135,6 +134,27 @@ class _MyAppState extends State<MyApp> {
       ),
     );
   }
+
+  Future<void> sendWifiLocationFromKotlin() async {
+    const MethodChannel methodChannel = MethodChannel('com.example.flutter_background_sendport/bg');
+
+    try {
+      final String? result = await methodChannel.invokeMethod<String>('getCurrentWifiLocation');
+      debugPrint('✅ Kotlinからの結果: $result');
+
+      if (result != null) {
+        final Map<String, dynamic> parsed = json.decode(result) as Map<String, dynamic>;
+        final Map<String, String> data = parsed.map((String k, v) => MapEntry(k, v.toString()));
+
+        debugPrint('📦 Dartで解析済みデータ: $data');
+
+        await _saveToIsar(data);
+        await _loadRecords(); // 追加後にリロード
+      }
+    } on PlatformException catch (e) {
+      debugPrint('⚠️ PlatformException: ${e.message}');
+    }
+  }
 }
 
 class BackgroundReceivePortSingleton {
@@ -144,7 +164,6 @@ class BackgroundReceivePortSingleton {
 
   SendPort? _sendPort;
 
-  // ignore: use_setters_to_change_properties
   void register(SendPort port) {
     _sendPort = port;
   }
@@ -160,7 +179,6 @@ Future<void> backgroundHandler(dynamic data) async {
   final SendPort? sendPort = BackgroundReceivePortSingleton.instance.port;
   if (sendPort != null) {
     if (data is Map) {
-      // 👇 JSON 文字列として送る
       sendPort.send('[backgroundHandler] ${jsonEncode(data)}');
     } else {
       sendPort.send('[backgroundHandler] $data');
@@ -180,35 +198,11 @@ Map<String, String>? _extractData(String message) {
   try {
     final String jsonText = match.group(0)!;
     final Map<String, dynamic> decoded = Map<String, dynamic>.from(jsonDecode(jsonText) as Map<dynamic, dynamic>);
-
-    // ignore: always_specify_types
     final Map<String, String> parsed = decoded.map((String key, value) => MapEntry(key, value.toString()));
     debugPrint('📦 パース結果: $parsed');
     return parsed;
   } catch (e) {
     debugPrint('❌ JSONパースエラー: $e');
     return null;
-  }
-}
-
-Future<void> sendWifiLocationFromKotlin() async {
-  const MethodChannel methodChannel = MethodChannel('com.example.flutter_background_sendport/bg');
-
-  try {
-    final String? result = await methodChannel.invokeMethod<String>('getCurrentWifiLocation');
-    debugPrint('✅ Kotlinからの結果: $result');
-
-    if (result != null) {
-      // JSON文字列 → Map に変換
-      final Map<String, dynamic> parsed = json.decode(result) as Map<String, dynamic>;
-      // ignore: always_specify_types
-      final Map<String, String> data = parsed.map((String k, v) => MapEntry(k, v.toString()));
-
-      debugPrint('📦 Dartで解析済みデータ: $data');
-
-      backgroundHandler(data);
-    }
-  } on PlatformException catch (e) {
-    debugPrint('⚠️ PlatformException: ${e.message}');
   }
 }

@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 part 'main.g.dart';
 
 final ReceivePort _backgroundReceivePort = ReceivePort();
+
 late Isar isar;
 
 @collection
@@ -24,6 +25,8 @@ class WifiCoordinate {
   late String longitude;
   late String ssid;
 }
+
+//--------------------------------------------------------------------------
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,6 +50,8 @@ void main() async {
   runApp(const MyApp());
 }
 
+//--------------------------------------------------------------------------
+
 Future<void> _saveToIsar(Map<String, String> data) async {
   final DateTime now = DateTime.now();
 
@@ -66,6 +71,8 @@ Future<void> _saveToIsar(Map<String, String> data) async {
   debugPrint('💾 保存完了: ${wifi.ssid} ${wifi.latitude}, ${wifi.longitude}');
 }
 
+//--------------------------------------------------------------------------
+
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
@@ -76,6 +83,7 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   List<WifiCoordinate> _records = <WifiCoordinate>[];
 
+  ///
   Future<void> _loadRecords() async {
     final List<WifiCoordinate> list = await isar.wifiCoordinates.where().sortByDate().thenByTime().findAll();
     setState(() {
@@ -83,6 +91,7 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
+  ///
   @override
   void initState() {
     super.initState();
@@ -97,6 +106,7 @@ class _MyAppState extends State<MyApp> {
     })();
   }
 
+  ///
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -135,6 +145,7 @@ class _MyAppState extends State<MyApp> {
     );
   }
 
+  ///
   Future<void> sendWifiLocationFromKotlin() async {
     const MethodChannel methodChannel = MethodChannel('com.example.flutter_background_sendport/bg');
 
@@ -157,6 +168,8 @@ class _MyAppState extends State<MyApp> {
   }
 }
 
+//--------------------------------------------------------------------------
+
 class BackgroundReceivePortSingleton {
   BackgroundReceivePortSingleton._();
 
@@ -170,6 +183,8 @@ class BackgroundReceivePortSingleton {
 
   SendPort? get port => _sendPort;
 }
+
+//--------------------------------------------------------------------------
 
 @pragma('vm:entry-point')
 Future<void> backgroundHandler(dynamic data) async {
@@ -187,6 +202,8 @@ Future<void> backgroundHandler(dynamic data) async {
     debugPrint('⚠️ SendPort not found');
   }
 }
+
+//--------------------------------------------------------------------------
 
 Map<String, String>? _extractData(String message) {
   final RegExp regex = RegExp(r'\{.*\}');

@@ -9,6 +9,9 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:isar/isar.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+import 'wifi_location_service_api.dart';
 
 part 'main.g.dart';
 
@@ -28,6 +31,9 @@ class WifiCoordinate {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 🔽 パーミッションのリクエスト追加
+  await [Permission.location, Permission.locationWhenInUse, Permission.locationAlways].request();
 
   final Directory dir = await getApplicationSupportDirectory();
   isar = await Isar.open(<CollectionSchema>[WifiCoordinateSchema], directory: dir.path);
@@ -87,25 +93,28 @@ class _MyAppState extends State<MyApp> {
 
     _loadRecords();
 
-    (() async {
+    // Plugin 初期化後にタイマー等を開始
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       await BackgroundTask.instance.setBackgroundHandler(backgroundHandler);
       await BackgroundTask.instance.start();
       debugPrint('✅ BackgroundTask started');
-    })();
 
-    _lastSentTime = DateTime.now();
+      _lastSentTime = DateTime.now();
 
-    _timer = Timer.periodic(const Duration(minutes: 1), (Timer t) async {
-      debugPrint('⏱️ タイマー発動');
-      await sendWifiLocationFromKotlin();
-    });
-
-    _ticker = Ticker((_) {
-      setState(() {
-        _elapsedSeconds = DateTime.now().difference(_lastSentTime).inMilliseconds / 1000.0;
+      // 🔽 ここでようやくタイマーを開始
+      _timer = Timer.periodic(const Duration(minutes: 1), (Timer t) async {
+        debugPrint('⏱️ タイマー発動');
+        await sendWifiLocationFromKotlin(); // MissingPluginException を回避
       });
+
+      // タイマー表示用の Ticker
+      _ticker = Ticker((_) {
+        setState(() {
+          _elapsedSeconds = DateTime.now().difference(_lastSentTime).inMilliseconds / 1000.0;
+        });
+      });
+      _ticker.start();
     });
-    _ticker.start();
   }
 
   @override
@@ -132,10 +141,44 @@ class _MyAppState extends State<MyApp> {
         body: Column(
           children: <Widget>[
             const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: const <Widget>[Text('⏳ 起動中… Wi-Fi取得は1分毎に実行されます')],
+
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  ElevatedButton.icon(
+                    onPressed: sendWifiLocationFromKotlin,
+                    icon: const Icon(Icons.wifi),
+                    label: const Text('📡 現在の位置を取得'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      WifiLocationServiceApi().startService();
+                    },
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('🟢 サービス開始'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      WifiLocationServiceApi().stopService();
+                    },
+                    icon: const Icon(Icons.stop),
+                    label: const Text('⛔️ サービス停止'),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () async {
+                      await startForegroundService();
+                    },
+                    child: const Text("🚀 ForegroundService起動"),
+                  ),
+                ],
+              ),
             ),
+
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
@@ -167,6 +210,8 @@ class _MyAppState extends State<MyApp> {
     const MethodChannel methodChannel = MethodChannel('com.example.flutter_background_sendport/bg');
 
     try {
+      if (!Platform.isAndroid) return;
+
       final String? result = await methodChannel.invokeMethod<String>('getCurrentWifiLocation');
       debugPrint('✅ Kotlinからの結果: $result');
 
@@ -180,6 +225,8 @@ class _MyAppState extends State<MyApp> {
         await _loadRecords();
         _lastSentTime = DateTime.now(); // ✅ 時刻更新
       }
+    } on MissingPluginException catch (e) {
+      debugPrint('❌ MissingPluginException: ${e.message}');
     } on PlatformException catch (e) {
       debugPrint('⚠️ PlatformException: ${e.message}');
     }
@@ -233,5 +280,16 @@ Map<String, String>? _extractData(String message) {
   } catch (e) {
     debugPrint('❌ JSONパースエラー: $e');
     return null;
+  }
+}
+
+Future<void> startForegroundService() async {
+  const MethodChannel methodChannel = MethodChannel('com.example.flutter_background_sendport/bg');
+
+  try {
+    final result = await methodChannel.invokeMethod<String>('startForegroundService');
+    debugPrint('🚀 ForegroundService 起動結果: $result');
+  } on PlatformException catch (e) {
+    debugPrint('❌ ForegroundService 起動エラー: ${e.message}');
   }
 }
